@@ -86,6 +86,16 @@ else
 QEMU_MACHINE := -cpu cortex-a53 -machine virt
 CFLAGS += -march=armv8-a -mtune=cortex-a53
 endif
+else ifeq ($(ARCH),aarch64_be)
+QEMU_ARCH := aarch64
+KERNEL_ARCH := arm64
+KERNEL_BZIMAGE := $(KERNEL_PATH)/arch/arm64/boot/Image
+ifeq ($(CHOST),$(CBUILD))
+QEMU_MACHINE := -cpu host -machine virt,gic_version=host,accel=kvm
+else
+QEMU_MACHINE := -cpu cortex-a53 -machine virt
+CFLAGS += -march=armv8-a -mtune=cortex-a53
+endif
 else ifeq ($(ARCH),arm)
 QEMU_ARCH := arm
 KERNEL_ARCH := arm
@@ -96,6 +106,17 @@ else
 QEMU_MACHINE := -cpu cortex-a15 -machine virt
 CFLAGS += -march=armv7-a -mtune=cortex-a15 -mabi=aapcs-linux
 endif
+else ifeq ($(ARCH),armeb)
+QEMU_ARCH := arm
+KERNEL_ARCH := arm
+KERNEL_BZIMAGE := $(KERNEL_PATH)/arch/arm/boot/zImage
+ifeq ($(CHOST),$(CBUILD))
+QEMU_MACHINE := -cpu host -machine virt,gic_version=host,accel=kvm
+else
+QEMU_MACHINE := -cpu cortex-a15 -machine virt
+CFLAGS += -march=armv7-a -mtune=cortex-a15 -mabi=aapcs-linux
+endif
+KERNEL_TREE_HACKS := sed -i 's/config ARCH_VIRT/\0\n\tselect ARCH_SUPPORTS_BIG_ENDIAN/' $(KERNEL_PATH)/arch/arm/Kconfig
 else ifeq ($(ARCH),x86_64)
 QEMU_ARCH := x86_64
 KERNEL_ARCH := x86_64
@@ -171,7 +192,7 @@ QEMU_MACHINE := -machine ppce500
 endif
 CFLAGS += -mcpu=powerpc -mlong-double-64 -msecure-plt
 else
-$(error I only build: x86_64, i686, arm, aarch64, mips, mipsel, mips64, mips64el, powerpc)
+$(error I only build: x86_64, i686, arm, armeb, aarch64, aarch64_be, mips, mipsel, mips64, mips64el, powerpc)
 endif
 
 REAL_CC := $(CBUILD)-gcc
@@ -222,6 +243,7 @@ $(KERNEL_PATH)/.installed: $(KERNEL_TAR)
 	flock -s $<.lock tar --strip-components=1 -C $(KERNEL_PATH) -xf $<
 	sed -i "/^if INET\$$/a source \"net/wireguard/Kconfig\"" $(KERNEL_PATH)/net/Kconfig
 	sed -i "/^obj-\$$(CONFIG_NETFILTER).*+=/a obj-\$$(CONFIG_WIREGUARD) += wireguard/" $(KERNEL_PATH)/net/Makefile
+	$(KERNEL_TREE_HACKS)
 	ln -sfT $(shell readlink -f ../..) $(KERNEL_PATH)/net/wireguard
 	touch $@
 else
@@ -236,10 +258,10 @@ always-pull: $(KERNEL_PATH)/.installed
 $(KERNEL_BZIMAGE): always-pull
 endif
 
-$(KERNEL_PATH)/.config: kernel.config arch/$(QEMU_ARCH).config | $(KERNEL_PATH)/.installed
+$(KERNEL_PATH)/.config: kernel.config arch/$(ARCH).config | $(KERNEL_PATH)/.installed
 	cp kernel.config $(KERNEL_PATH)/minimal.config
 	printf 'CONFIG_NR_CPUS=$(NR_CPUS)\nCONFIG_INITRAMFS_SOURCE="$(BUILD_PATH)/init-cpio-spec.txt"\n' >> $(KERNEL_PATH)/minimal.config
-	cat arch/$(QEMU_ARCH).config >> $(KERNEL_PATH)/minimal.config
+	cat arch/$(ARCH).config >> $(KERNEL_PATH)/minimal.config
 	$(MAKE) -C $(KERNEL_PATH) ARCH=$(KERNEL_ARCH) allnoconfig
 	cd $(KERNEL_PATH) && ARCH=$(KERNEL_ARCH) scripts/kconfig/merge_config.sh -n .config minimal.config
 	$(if $(findstring -debug,$(KERNEL_VERSION)),cd $(KERNEL_PATH) && sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -debug/' Makefile && ARCH=$(KERNEL_ARCH) scripts/kconfig/merge_config.sh -n .config $(PWD)/debug.config,)
